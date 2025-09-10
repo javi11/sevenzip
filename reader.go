@@ -844,3 +844,78 @@ func (d *openDir) ReadDir(count int) ([]iofs.DirEntry, error) {
 
 	return list, nil
 }
+
+// ListFilesWithOffsets returns information about files in the archive including their
+// absolute offsets and sizes. Only non-encrypted, non-compressed files are included
+// in the result, as these are the only files where direct offset access is meaningful.
+func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
+	if z.si == nil {
+		return nil, errors.New("sevenzip: no streams info available")
+	}
+
+	var result []FileInfo
+	
+	// Track which folders use compression or encryption
+	folderCompressed := make(map[int]bool)
+	folderEncrypted := make(map[int]bool)
+	
+	// Check each folder for compression and encryption
+	if z.si.unpackInfo != nil {
+		for folderIdx, folder := range z.si.unpackInfo.folder {
+			for _, coder := range folder.coder {
+				// Check if this is the copy (no compression) method
+				if len(coder.id) == 1 && coder.id[0] == 0x00 {
+					// This is copy/store method - no compression
+					continue
+				}
+				
+				// Check for AES encryption
+				if len(coder.id) == 4 && 
+					coder.id[0] == 0x06 && coder.id[1] == 0xf1 && 
+					coder.id[2] == 0x07 && coder.id[3] == 0x01 {
+					folderEncrypted[folderIdx] = true
+				} else {
+					// Any other coder means compression
+					folderCompressed[folderIdx] = true
+				}
+			}
+		}
+	}
+	
+	// Process each file
+	for _, file := range z.File {
+		// Skip empty files and directories
+		if file.FileHeader.isEmptyStream || file.FileHeader.isEmptyFile {
+			continue
+		}
+		
+		if file.FileHeader.FileInfo().IsDir() {
+			continue
+		}
+		
+		// Check if the file's folder is compressed or encrypted
+		isCompressed := folderCompressed[file.folder]
+		isEncrypted := folderEncrypted[file.folder]
+		
+		// Calculate absolute offset for the file
+		// This is the folder's offset in the packed stream plus the file's offset within the folder
+		var absoluteOffset int64
+		if z.si.packInfo != nil {
+			folderOffset := z.si.folderOffset(file.folder)
+			absoluteOffset = folderOffset + file.offset
+		}
+		
+		info := FileInfo{
+			Name:        file.FileHeader.Name,
+			Offset:      absoluteOffset,
+			Size:        file.FileHeader.UncompressedSize,
+			Compressed:  isCompressed,
+			Encrypted:   isEncrypted,
+			FolderIndex: file.folder,
+		}
+		
+		result = append(result, info)
+	}
+	
+	return result, nil
+}
