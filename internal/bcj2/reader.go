@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/bodgit/sevenzip/internal/util"
+	"github.com/javi11/sevenzip/internal/util"
 )
 
 type readCloser struct {

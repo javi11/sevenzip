@@ -14,8 +14,8 @@ import (
 	"testing/fstest"
 	"testing/iotest"
 
-	"github.com/bodgit/sevenzip"
-	"github.com/bodgit/sevenzip/internal/util"
+	"github.com/javi11/sevenzip"
+	"github.com/javi11/sevenzip/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -656,4 +656,94 @@ func BenchmarkARM(b *testing.B) {
 
 func BenchmarkSPARC(b *testing.B) {
 	benchmarkArchive(b, "sparc.7z", "", true)
+}
+
+func TestListFilesWithOffsets(t *testing.T) {
+	t.Parallel()
+
+	// Test with a simple archive that contains uncompressed files
+	t.Run("UncompressedFiles", func(t *testing.T) {
+		r, err := sevenzip.OpenReader(filepath.Join("testdata", "copy.7z"))
+		if err != nil {
+			t.Skip("Test file not found, skipping test")
+		}
+		defer r.Close()
+
+		files, err := r.ListFilesWithOffsets()
+		assert.NoError(t, err)
+		assert.NotNil(t, files)
+
+		// Check that we have some files
+		assert.Greater(t, len(files), 0)
+
+		// Verify file info structure
+		uncompressedCount := 0
+		for _, file := range files {
+			assert.NotEmpty(t, file.Name)
+			assert.GreaterOrEqual(t, file.Offset, int64(0))
+			assert.GreaterOrEqual(t, file.Size, uint64(0))
+			assert.GreaterOrEqual(t, file.FolderIndex, 0)
+
+			// Log the file info for debugging
+			t.Logf("File: %s, Offset: %d, Size: %d, Compressed: %v, Encrypted: %v",
+				file.Name, file.Offset, file.Size, file.Compressed, file.Encrypted)
+
+			if !file.Compressed && !file.Encrypted {
+				uncompressedCount++
+			}
+		}
+
+		// For copy.7z, all files should be uncompressed
+		assert.Equal(t, len(files), uncompressedCount, "All files in copy.7z should be uncompressed")
+	})
+
+	// Test with a compressed archive
+	t.Run("CompressedFiles", func(t *testing.T) {
+		r, err := sevenzip.OpenReader(filepath.Join("testdata", "lzma.7z"))
+		if err != nil {
+			t.Skip("Test file not found, skipping test")
+		}
+		defer r.Close()
+
+		files, err := r.ListFilesWithOffsets()
+		assert.NoError(t, err)
+		assert.NotNil(t, files)
+
+		// Check that compressed files are properly identified
+		compressedCount := 0
+		for _, file := range files {
+			if file.Compressed {
+				compressedCount++
+				t.Logf("Found compressed file: %s", file.Name)
+			}
+		}
+
+		// For lzma.7z, files should be compressed
+		assert.Greater(t, compressedCount, 0, "Should have compressed files in lzma.7z")
+	})
+
+	// Test with encrypted archive
+	t.Run("EncryptedFiles", func(t *testing.T) {
+		r, err := sevenzip.OpenReaderWithPassword(filepath.Join("testdata", "aes7z.7z"), "password")
+		if err != nil {
+			t.Skip("Test file not found, skipping test")
+		}
+		defer r.Close()
+
+		files, err := r.ListFilesWithOffsets()
+		assert.NoError(t, err)
+		assert.NotNil(t, files)
+
+		// Check that encrypted files are properly identified
+		encryptedCount := 0
+		for _, file := range files {
+			if file.Encrypted {
+				encryptedCount++
+				t.Logf("Found encrypted file: %s", file.Name)
+			}
+		}
+
+		// For aes7z.7z, files should be encrypted
+		assert.Greater(t, encryptedCount, 0, "Should have encrypted files in aes7z.7z")
+	})
 }
