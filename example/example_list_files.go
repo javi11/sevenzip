@@ -5,7 +5,7 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/bodgit/sevenzip"
+	"github.com/javi11/sevenzip"
 )
 
 func main() {

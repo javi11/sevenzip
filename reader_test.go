@@ -14,8 +14,8 @@ import (
 	"testing/fstest"
 	"testing/iotest"
 
-	"github.com/bodgit/sevenzip"
-	"github.com/bodgit/sevenzip/internal/util"
+	"github.com/javi11/sevenzip"
+	"github.com/javi11/sevenzip/internal/util"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -683,16 +683,16 @@ func TestListFilesWithOffsets(t *testing.T) {
 			assert.GreaterOrEqual(t, file.Offset, int64(0))
 			assert.GreaterOrEqual(t, file.Size, uint64(0))
 			assert.GreaterOrEqual(t, file.FolderIndex, 0)
-			
+
 			// Log the file info for debugging
 			t.Logf("File: %s, Offset: %d, Size: %d, Compressed: %v, Encrypted: %v",
 				file.Name, file.Offset, file.Size, file.Compressed, file.Encrypted)
-			
+
 			if !file.Compressed && !file.Encrypted {
 				uncompressedCount++
 			}
 		}
-		
+
 		// For copy.7z, all files should be uncompressed
 		assert.Equal(t, len(files), uncompressedCount, "All files in copy.7z should be uncompressed")
 	})
@@ -717,7 +717,7 @@ func TestListFilesWithOffsets(t *testing.T) {
 				t.Logf("Found compressed file: %s", file.Name)
 			}
 		}
-		
+
 		// For lzma.7z, files should be compressed
 		assert.Greater(t, compressedCount, 0, "Should have compressed files in lzma.7z")
 	})
@@ -742,7 +742,7 @@ func TestListFilesWithOffsets(t *testing.T) {
 				t.Logf("Found encrypted file: %s", file.Name)
 			}
 		}
-		
+
 		// For aes7z.7z, files should be encrypted
 		assert.Greater(t, encryptedCount, 0, "Should have encrypted files in aes7z.7z")
 	})

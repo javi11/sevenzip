@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/bodgit/plumbing"
-	"github.com/bodgit/sevenzip/internal/pool"
-	"github.com/bodgit/sevenzip/internal/util"
+	"github.com/javi11/sevenzip/internal/pool"
+	"github.com/javi11/sevenzip/internal/util"
 	"github.com/spf13/afero"
 	"go4.org/readerutil"
 )
@@ -854,11 +854,11 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 	}
 
 	var result []FileInfo
-	
+
 	// Track which folders use compression or encryption
 	folderCompressed := make(map[int]bool)
 	folderEncrypted := make(map[int]bool)
-	
+
 	// Check each folder for compression and encryption
 	if z.si.unpackInfo != nil {
 		for folderIdx, folder := range z.si.unpackInfo.folder {
@@ -868,10 +868,10 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 					// This is copy/store method - no compression
 					continue
 				}
-				
+
 				// Check for AES encryption
-				if len(coder.id) == 4 && 
-					coder.id[0] == 0x06 && coder.id[1] == 0xf1 && 
+				if len(coder.id) == 4 &&
+					coder.id[0] == 0x06 && coder.id[1] == 0xf1 &&
 					coder.id[2] == 0x07 && coder.id[3] == 0x01 {
 					folderEncrypted[folderIdx] = true
 				} else {
@@ -881,22 +881,22 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 			}
 		}
 	}
-	
+
 	// Process each file
 	for _, file := range z.File {
 		// Skip empty files and directories
 		if file.FileHeader.isEmptyStream || file.FileHeader.isEmptyFile {
 			continue
 		}
-		
+
 		if file.FileHeader.FileInfo().IsDir() {
 			continue
 		}
-		
+
 		// Check if the file's folder is compressed or encrypted
 		isCompressed := folderCompressed[file.folder]
 		isEncrypted := folderEncrypted[file.folder]
-		
+
 		// Calculate absolute offset for the file
 		// This is the folder's offset in the packed stream plus the file's offset within the folder
 		var absoluteOffset int64
@@ -904,7 +904,7 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 			folderOffset := z.si.folderOffset(file.folder)
 			absoluteOffset = folderOffset + file.offset
 		}
-		
+
 		info := FileInfo{
 			Name:        file.FileHeader.Name,
 			Offset:      absoluteOffset,
@@ -913,9 +913,9 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 			Encrypted:   isEncrypted,
 			FolderIndex: file.folder,
 		}
-		
+
 		result = append(result, info)
 	}
-	
+
 	return result, nil
 }

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/bodgit/sevenzip"
+	"github.com/javi11/sevenzip"
 )
 
 func main() {
@@ -56,7 +56,7 @@ func main() {
 
 	// Show archive information
 	fmt.Printf("Archive: %s\n", filepath.Base(archivePath))
-	
+
 	// List volumes if multipart
 	volumes := reader.Volumes()
 	if len(volumes) > 1 {
@@ -77,7 +77,7 @@ func main() {
 
 	// Create a tabwriter for better formatting
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	
+
 	// Print header
 	fmt.Fprintln(w, "Type\tOffset\tSize\tFolder\tName")
 	fmt.Fprintln(w, "----\t------\t----\t------\t----")
@@ -93,7 +93,7 @@ func main() {
 	// Print file information
 	for _, file := range files {
 		var fileType string
-		
+
 		if file.Encrypted {
 			fileType = "ENC"
 			encryptedCount++

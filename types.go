@@ -10,8 +10,8 @@ import (
 	"math/bits"
 	"time"
 
-	"github.com/bodgit/sevenzip/internal/util"
 	"github.com/bodgit/windows"
+	"github.com/javi11/sevenzip/internal/util"
 	"golang.org/x/text/encoding/unicode"
 	"golang.org/x/text/transform"
 )
@@ -48,12 +48,12 @@ const (
 // FileInfo contains information about a file's location and size in the archive.
 // This is useful for direct access to uncompressed, non-encrypted files.
 type FileInfo struct {
-	Name         string // File name
-	Offset       int64  // Absolute offset in the archive
-	Size         uint64 // Uncompressed size
-	Compressed   bool   // Whether the file is compressed
-	Encrypted    bool   // Whether the file is encrypted
-	FolderIndex  int    // Index of the folder/stream containing this file
+	Name        string // File name
+	Offset      int64  // Absolute offset in the archive
+	Size        uint64 // Uncompressed size
+	Compressed  bool   // Whether the file is compressed
+	Encrypted   bool   // Whether the file is encrypted
+	FolderIndex int    // Index of the folder/stream containing this file
 }
 
 var (

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/bodgit/sevenzip/internal/util"
+	"github.com/javi11/sevenzip/internal/util"
 )
 
 // Pooler is the interface implemented by a pool.

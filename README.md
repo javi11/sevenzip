@@ -10,19 +10,22 @@
 
 # sevenzip
 
+This is a fork of the original [sevenzip](https://github.com/bodgit/sevenzip) package.
+It has been modified to add ListFilesWithOffsets() to the Reader type.
+
 A reader for 7-zip archives inspired by `archive/zip`.
 
 Current status:
 
-* Pure Go, no external libraries or binaries needed.
-* Handles uncompressed headers, (`7za a -mhc=off test.7z ...`).
-* Handles compressed headers, (`7za a -mhc=on test.7z ...`).
-* Handles password-protected versions of both of the above (`7za a -mhc=on|off -mhe=on -ppassword test.7z ...`).
-* Handles archives split into multiple volumes, (`7za a -v100m test.7z ...`).
-* Handles self-extracting archives, (`7za a -sfx archive.exe ...`).
-* Validates CRC values as it parses the file.
-* Supports ARM, BCJ, BCJ2, Brotli, Bzip2, Copy, Deflate, Delta, LZ4, LZMA, LZMA2, PPC, SPARC and Zstandard methods.
-* Implements the `fs.FS` interface so you can treat an opened 7-zip archive like a filesystem.
+- Pure Go, no external libraries or binaries needed.
+- Handles uncompressed headers, (`7za a -mhc=off test.7z ...`).
+- Handles compressed headers, (`7za a -mhc=on test.7z ...`).
+- Handles password-protected versions of both of the above (`7za a -mhc=on|off -mhe=on -ppassword test.7z ...`).
+- Handles archives split into multiple volumes, (`7za a -v100m test.7z ...`).
+- Handles self-extracting archives, (`7za a -sfx archive.exe ...`).
+- Validates CRC values as it parses the file.
+- Supports ARM, BCJ, BCJ2, Brotli, Bzip2, Copy, Deflate, Delta, LZ4, LZMA, LZMA2, PPC, SPARC and Zstandard methods.
+- Implements the `fs.FS` interface so you can treat an opened 7-zip archive like a filesystem.
 
 More examples of 7-zip archives are needed to test all of the different combinations/algorithms possible.
 
@@ -31,6 +34,7 @@ More examples of 7-zip archives are needed to test all of the different combinat
 ### Why is my code running so slow?
 
 Someone might write the following simple code:
+
 ```golang
 func extractArchive(archive string) error {
         r, err := sevenzip.OpenReader(archive)
@@ -52,6 +56,7 @@ func extractArchive(archive string) error {
         return nil
 }
 ```
+
 Unlike a zip archive where every file is individually compressed, 7-zip archives can have all of the files compressed together in one long compressed stream, supposedly to achieve a better compression ratio.
 In a naive random access implementation, to read the first file you start at the beginning of the compressed stream and read out that files worth of bytes.
 To read the second file you have to start at the beginning of the compressed stream again, read and discard the first files worth of bytes to get to the correct offset in the stream, then read out the second files worth of bytes.
@@ -59,6 +64,7 @@ You can see that for an archive that contains hundreds of files, extraction can 
 
 This package contains an optimisation that caches and reuses the underlying compressed stream reader so you don't have to keep starting from the beginning for each file, but it does require you to call `rc.Close()` before extracting the next file.
 So write your code similar to this:
+
 ```golang
 func extractFile(file *sevenzip.File) error {
         rc, err := f.Open()
@@ -88,9 +94,11 @@ func extractArchive(archive string) error {
         return nil
 }
 ```
+
 You can see the main difference is to not defer all of the `Close()` calls until the end of `extractArchive()`.
 
 There is a set of benchmarks in this package that demonstrates the performance boost that the optimisation provides, amongst other techniques:
+
 ```
 $ go test -v -run='^$' -bench='Reader$' -benchtime=60s
 goos: darwin
@@ -110,6 +118,7 @@ BenchmarkParallelReader-12               	     636	 112551812 ns/op
 PASS
 ok  	github.com/bodgit/sevenzip	472.251s
 ```
+
 The archive used here is just the reference LZMA SDK archive, which is only 1 MiB in size but does contain 630+ files split across three compression streams.
 The only difference between BenchmarkNaiveReader and the rest is the lack of a call to `rc.Close()` between files so the stream reuse optimisation doesn't take effect.
 
@@ -129,6 +138,7 @@ This manifests itself when the file has been compressed _and_ encrypted; during 
 A `sevenzip.ReadError` error type can be returned for certain operations.
 If `sevenzip.ReadError.Encrypted` is `true` then encryption is involved and you can use that as a **hint** to either set a password or try a different one.
 Use `errors.As()` to check like this:
+
 ```golang
 r, err := sevenzip.OpenReaderWithPassword(archive, password)
 if err != nil {
@@ -140,6 +150,7 @@ if err != nil {
         return err
 }
 ```
+
 Be aware that if the archive does not have the headers encrypted, (`7za a -mhe=off -ppassword test.7z ...`), then you can always open the archive and the password is only used when extracting the files.
 
 If files are added to the archive encrypted and _not_ compressed, (`7za a -m0=copy -ppassword test.7z ...`), then you will never get an error extracting with the wrong password as the only consumer of the decrypted content will be your own code. To detect a potentially wrong password, calculate the CRC value and check that it matches the value in `sevenzip.FileHeader.CRC32`.
