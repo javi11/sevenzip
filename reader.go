@@ -846,8 +846,15 @@ func (d *openDir) ReadDir(count int) ([]iofs.DirEntry, error) {
 }
 
 // ListFilesWithOffsets returns information about files in the archive including their
-// absolute offsets and sizes. Only non-encrypted, non-compressed files are included
-// in the result, as these are the only files where direct offset access is meaningful.
+// absolute offsets and sizes. All files are included in the result, with flags indicating
+// whether they are compressed or encrypted.
+//
+// The Offset field represents the absolute byte position from the start of the archive file
+// where the file's data begins. For uncompressed, non-encrypted files, this offset can be
+// used for direct random access reads without decompression overhead.
+//
+// For compressed or encrypted files, the offset is still provided but direct extraction
+// is not possible - use the standard File.Open() method instead.
 func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 	if z.si == nil {
 		return nil, errors.New("sevenzip: no streams info available")
@@ -898,11 +905,12 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 		isEncrypted := folderEncrypted[file.folder]
 
 		// Calculate absolute offset for the file
-		// This is the folder's offset in the packed stream plus the file's offset within the folder
+		// This is z.start (where packed data begins in the file) plus the folder's offset
+		// in the packed stream plus the file's offset within the folder
 		var absoluteOffset int64
 		if z.si.packInfo != nil {
 			folderOffset := z.si.folderOffset(file.folder)
-			absoluteOffset = folderOffset + file.offset
+			absoluteOffset = z.start + folderOffset + file.offset
 		}
 
 		info := FileInfo{
