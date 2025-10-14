@@ -252,9 +252,16 @@ func openReader(fs afero.Fs, name string) (io.ReaderAt, int64, []afero.File, err
 // OpenReaderWithPassword will open the 7-zip file specified by name using
 // password as the basis of the decryption key and return a [*ReadCloser]. If
 // name has a ".001" suffix it is assumed there are multiple volumes and each
-// sequential volume will be opened.
-func OpenReaderWithPassword(name, password string) (*ReadCloser, error) {
-	reader, size, files, err := openReader(afero.NewOsFs(), name)
+// sequential volume will be opened. An optional custom filesystem can be provided;
+// if not specified, the default OS filesystem is used.
+func OpenReaderWithPassword(name, password string, fs ...afero.Fs) (*ReadCloser, error) {
+	// Use provided filesystem or default to OS filesystem
+	filesystem := afero.NewOsFs()
+	if len(fs) > 0 && fs[0] != nil {
+		filesystem = fs[0]
+	}
+
+	reader, size, files, err := openReader(filesystem, name)
 	if err != nil {
 		return nil, err
 	}
@@ -280,9 +287,10 @@ func OpenReaderWithPassword(name, password string) (*ReadCloser, error) {
 
 // OpenReader will open the 7-zip file specified by name and return a
 // [*ReadCloser]. If name has a ".001" suffix it is assumed there are multiple
-// volumes and each sequential volume will be opened.
-func OpenReader(name string) (*ReadCloser, error) {
-	return OpenReaderWithPassword(name, "")
+// volumes and each sequential volume will be opened. An optional custom filesystem
+// can be provided; if not specified, the default OS filesystem is used.
+func OpenReader(name string, fs ...afero.Fs) (*ReadCloser, error) {
+	return OpenReaderWithPassword(name, "", fs...)
 }
 
 // NewReaderWithPassword returns a new [*Reader] reading from r using password
