@@ -49,10 +49,10 @@ const (
 // This is useful for direct access to uncompressed, non-encrypted files.
 type FileInfo struct {
 	Name        string // File name
-	Offset      int64  // Absolute offset in the archive
-	Size        uint64 // Uncompressed size
-	Compressed  bool   // Whether the file is compressed
-	Encrypted   bool   // Whether the file is encrypted
+	Offset      int64  // Absolute offset from the start of the archive file where the file's data begins
+	Size        uint64 // Uncompressed size in bytes
+	Compressed  bool   // Whether the file uses compression (true means direct extraction not possible)
+	Encrypted   bool   // Whether the file is encrypted (true means direct extraction not possible)
 	FolderIndex int    // Index of the folder/stream containing this file
 }
 

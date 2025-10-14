@@ -746,4 +746,72 @@ func TestListFilesWithOffsets(t *testing.T) {
 		// For aes7z.7z, files should be encrypted
 		assert.Greater(t, encryptedCount, 0, "Should have encrypted files in aes7z.7z")
 	})
+
+	// Test direct offset extraction validation
+	t.Run("DirectOffsetExtraction", func(t *testing.T) {
+		archivePath := filepath.Join("testdata", "copy.7z")
+		r, err := sevenzip.OpenReader(archivePath)
+		if err != nil {
+			t.Skip("Test file not found, skipping test")
+		}
+		defer r.Close()
+
+		files, err := r.ListFilesWithOffsets()
+		assert.NoError(t, err)
+		assert.NotNil(t, files)
+
+		// Find uncompressed, non-encrypted files
+		for _, fileInfo := range files {
+			if fileInfo.Compressed || fileInfo.Encrypted {
+				continue
+			}
+
+			// Find the corresponding File object
+			var targetFile *sevenzip.File
+			for _, f := range r.File {
+				if f.Name == fileInfo.Name {
+					targetFile = f
+					break
+				}
+			}
+
+			if targetFile == nil {
+				t.Fatalf("Could not find File object for %s", fileInfo.Name)
+			}
+
+			// Extract using standard method
+			rc, err := targetFile.Open()
+			assert.NoError(t, err)
+
+			standardData, err := io.ReadAll(rc)
+			assert.NoError(t, err)
+			rc.Close()
+
+			// Extract using direct offset reading
+			f, err := os.Open(archivePath)
+			assert.NoError(t, err)
+
+			directData := make([]byte, fileInfo.Size)
+			n, err := f.ReadAt(directData, fileInfo.Offset)
+			assert.NoError(t, err)
+			assert.Equal(t, int(fileInfo.Size), n)
+			f.Close()
+
+			// Compare the data
+			assert.Equal(t, standardData, directData,
+				"Data mismatch for file %s: direct offset extraction should match standard extraction",
+				fileInfo.Name)
+
+			// Verify CRC32
+			if targetFile.CRC32 != 0 {
+				h := crc32.NewIEEE()
+				h.Write(directData)
+				assert.True(t, util.CRC32Equal(h.Sum(nil), targetFile.CRC32),
+					"CRC32 mismatch for file %s", fileInfo.Name)
+			}
+
+			t.Logf("Successfully validated direct offset extraction for %s (size: %d, offset: %d)",
+				fileInfo.Name, fileInfo.Size, fileInfo.Offset)
+		}
+	})
 }

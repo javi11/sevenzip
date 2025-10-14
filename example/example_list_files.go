@@ -1,16 +1,38 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"path/filepath"
 
 	"github.com/javi11/sevenzip"
 )
 
 func main() {
-	// Path to your multipart 7zip file
-	archivePath := "/Users/javi/SnelNL/downloads/Jurassic.World.2015.2160p.UHD.BluRay.REMUX.DTS-X.7.1.HDR.HEVC-UnKn0wn.mkv (1)/3i1odSJ622ygK5RuJMvULyGwZEFZQkKx.7z.001"
+	// Parse command-line arguments
+	var outputDir string
+	flag.StringVar(&outputDir, "o", "./extracted_files", "Output directory for extracted files")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] <archive.7z or archive.7z.001>\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "List and extract files from a 7zip archive with offset information.\n\n")
+		fmt.Fprintf(os.Stderr, "Options:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExample:\n")
+		fmt.Fprintf(os.Stderr, "  %s archive.7z\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -o ./output multipart.7z.001\n", os.Args[0])
+	}
+	flag.Parse()
+
+	// Check if archive path is provided
+	if flag.NArg() < 1 {
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	archivePath := flag.Arg(0)
 
 	fmt.Printf("Opening multipart archive: %s\n", filepath.Base(archivePath))
 	fmt.Println("=" + string(make([]byte, 80)) + "=")
@@ -117,7 +139,77 @@ func main() {
 	if len(uncompressedFiles) > 0 {
 		fmt.Println("\nNOTE: Uncompressed, non-encrypted files can be read directly from the archive")
 		fmt.Println("      at their specified offsets without decompression overhead.")
+
+		// Example: Extract the first uncompressed file
+		fmt.Println("\n" + "=" + string(make([]byte, 80)) + "=")
+		fmt.Println("EXTRACTION EXAMPLE:")
+
+		if len(uncompressedFiles) > 0 {
+			// Take the first uncompressed file as an example
+			fileToExtract := uncompressedFiles[0]
+			fmt.Printf("\nExtracting file: %s\n", fileToExtract.Name)
+			fmt.Printf("  Offset: %d bytes\n", fileToExtract.Offset)
+			fmt.Printf("  Size: %d bytes\n", fileToExtract.Size)
+
+			// Method 1: Using the standard Open() method (works for all files)
+			extractUsingStandardMethod(reader, fileToExtract, outputDir)
+
+			// Method 2: Direct offset reading (only for uncompressed files)
+			// This would require opening the archive file directly and seeking to the offset
+			// Note: This is more complex with multipart archives as you need to handle volume boundaries
+			fmt.Println("\nDirect offset extraction is possible for uncompressed files but requires:")
+			fmt.Println("  1. Opening the archive file(s) directly")
+			fmt.Println("  2. Calculating which volume contains the offset")
+			fmt.Println("  3. Seeking to the correct position")
+			fmt.Println("  4. Reading the exact number of bytes")
+		}
 	}
+}
+
+// extractUsingStandardMethod extracts a file using the standard 7zip API
+func extractUsingStandardMethod(reader *sevenzip.ReadCloser, fileInfo sevenzip.FileInfo, outputDir string) {
+	// Find the file in the archive
+	for _, file := range reader.File {
+		if file.Name == fileInfo.Name {
+			// Open the file from the archive
+			rc, err := file.Open()
+			if err != nil {
+				log.Printf("Failed to open file %s: %v", fileInfo.Name, err)
+				return
+			}
+			defer rc.Close()
+
+			// Create output directory if it doesn't exist
+			if err := os.MkdirAll(outputDir, 0755); err != nil {
+				log.Printf("Failed to create output directory: %v", err)
+				return
+			}
+
+			// Create the output file
+			outputPath := filepath.Join(outputDir, filepath.Base(fileInfo.Name))
+			outFile, err := os.Create(outputPath)
+			if err != nil {
+				log.Printf("Failed to create output file: %v", err)
+				return
+			}
+			defer outFile.Close()
+
+			// Copy the file contents
+			written, err := io.Copy(outFile, rc)
+			if err != nil {
+				log.Printf("Failed to extract file: %v", err)
+				return
+			}
+
+			fmt.Printf("\nSuccessfully extracted using standard method:\n")
+			fmt.Printf("  Output: %s\n", outputPath)
+			fmt.Printf("  Bytes written: %d\n", written)
+
+			return
+		}
+	}
+
+	log.Printf("File %s not found in archive", fileInfo.Name)
 }
 
 // Helper function to truncate long strings
