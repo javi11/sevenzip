@@ -139,21 +139,21 @@ func main() {
 	if len(uncompressedFiles) > 0 {
 		fmt.Println("\nNOTE: Uncompressed, non-encrypted files can be read directly from the archive")
 		fmt.Println("      at their specified offsets without decompression overhead.")
-		
+
 		// Example: Extract the first uncompressed file
 		fmt.Println("\n" + "=" + string(make([]byte, 80)) + "=")
 		fmt.Println("EXTRACTION EXAMPLE:")
-		
+
 		if len(uncompressedFiles) > 0 {
 			// Take the first uncompressed file as an example
 			fileToExtract := uncompressedFiles[0]
 			fmt.Printf("\nExtracting file: %s\n", fileToExtract.Name)
 			fmt.Printf("  Offset: %d bytes\n", fileToExtract.Offset)
 			fmt.Printf("  Size: %d bytes\n", fileToExtract.Size)
-			
+
 			// Method 1: Using the standard Open() method (works for all files)
 			extractUsingStandardMethod(reader, fileToExtract, outputDir)
-			
+
 			// Method 2: Direct offset reading (only for uncompressed files)
 			// This would require opening the archive file directly and seeking to the offset
 			// Note: This is more complex with multipart archives as you need to handle volume boundaries
@@ -178,13 +178,13 @@ func extractUsingStandardMethod(reader *sevenzip.ReadCloser, fileInfo sevenzip.F
 				return
 			}
 			defer rc.Close()
-			
+
 			// Create output directory if it doesn't exist
 			if err := os.MkdirAll(outputDir, 0755); err != nil {
 				log.Printf("Failed to create output directory: %v", err)
 				return
 			}
-			
+
 			// Create the output file
 			outputPath := filepath.Join(outputDir, filepath.Base(fileInfo.Name))
 			outFile, err := os.Create(outputPath)
@@ -193,22 +193,22 @@ func extractUsingStandardMethod(reader *sevenzip.ReadCloser, fileInfo sevenzip.F
 				return
 			}
 			defer outFile.Close()
-			
+
 			// Copy the file contents
 			written, err := io.Copy(outFile, rc)
 			if err != nil {
 				log.Printf("Failed to extract file: %v", err)
 				return
 			}
-			
+
 			fmt.Printf("\nSuccessfully extracted using standard method:\n")
 			fmt.Printf("  Output: %s\n", outputPath)
 			fmt.Printf("  Bytes written: %d\n", written)
-			
+
 			return
 		}
 	}
-	
+
 	log.Printf("File %s not found in archive", fileInfo.Name)
 }
 
