@@ -853,6 +853,68 @@ func (d *openDir) ReadDir(count int) ([]iofs.DirEntry, error) {
 	return list, nil
 }
 
+// extractAESParams extracts AES encryption parameters from a folder's coders.
+// Returns the salt, IV, and number of KDF iterations, plus a boolean indicating if AES was found.
+// The 7-zip AES format stores these in the coder properties:
+//   Byte 0: 0xC0 | (cycles & 0x3F) | (saltSize-derived) | (ivSize-derived)
+//   Byte 1: Additional size information
+//   Bytes 2+: Salt bytes followed by IV bytes
+func extractAESParams(folder *folder) (salt []byte, iv []byte, iterations int, hasAES bool) {
+	if folder == nil {
+		return nil, nil, 0, false
+	}
+
+	for _, coder := range folder.coder {
+		// Check for AES-256 coder ID: 0x06 0xF1 0x07 0x01
+		if len(coder.id) == 4 &&
+			coder.id[0] == 0x06 && coder.id[1] == 0xf1 &&
+			coder.id[2] == 0x07 && coder.id[3] == 0x01 {
+
+			// Need at least 2 bytes for AES properties header
+			if len(coder.properties) < 2 {
+				continue
+			}
+
+			// Parse AES property format from 7-zip
+			// Byte 0: bits 0-5 = cycles, bit 6 = IV flag, bit 7 = salt flag
+			// Byte 1: bits 0-3 = IV size, bits 4-7 = salt size
+			saltSize := int(coder.properties[0]>>7&1 + coder.properties[1]>>4)
+			ivSize := int(coder.properties[0]>>6&1 + coder.properties[1]&0x0f)
+			cycles := int(coder.properties[0] & 0x3f)
+
+			// Verify we have enough bytes for salt and IV
+			if len(coder.properties) < 2+saltSize+ivSize {
+				continue
+			}
+
+			// Extract salt (if present)
+			if saltSize > 0 {
+				salt = make([]byte, saltSize)
+				copy(salt, coder.properties[2:2+saltSize])
+			}
+
+			// Extract IV and pad to AES block size (16 bytes)
+			iv = make([]byte, 16) // AES block size
+			if ivSize > 0 {
+				copy(iv, coder.properties[2+saltSize:2+saltSize+ivSize])
+			}
+
+			// Calculate iterations: 2^cycles
+			if cycles == 0x3f {
+				// Special case: 0x3f means no hashing, direct key
+				iterations = 0
+			} else {
+				iterations = 1 << uint(cycles)
+			}
+
+			hasAES = true
+			return
+		}
+	}
+
+	return nil, nil, 0, false
+}
+
 // ListFilesWithOffsets returns information about files in the archive including their
 // absolute offsets and sizes. All files are included in the result, with flags indicating
 // whether they are compressed or encrypted.
@@ -863,6 +925,9 @@ func (d *openDir) ReadDir(count int) ([]iofs.DirEntry, error) {
 //
 // For compressed or encrypted files, the offset is still provided but direct extraction
 // is not possible - use the standard File.Open() method instead.
+//
+// For encrypted files, AES encryption parameters (salt, IV, KDF iterations) are populated
+// to enable external streaming and seeking. See FileInfo documentation for usage details.
 func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 	if z.si == nil {
 		return nil, errors.New("sevenzip: no streams info available")
@@ -873,10 +938,27 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 	// Track which folders use compression or encryption
 	folderCompressed := make(map[int]bool)
 	folderEncrypted := make(map[int]bool)
+	folderAESParams := make(map[int]struct {
+		salt       []byte
+		iv         []byte
+		iterations int
+	})
 
 	// Check each folder for compression and encryption
 	if z.si.unpackInfo != nil {
 		for folderIdx, folder := range z.si.unpackInfo.folder {
+			// Extract AES parameters if encrypted
+			salt, iv, iterations, hasAES := extractAESParams(folder)
+			if hasAES {
+				folderEncrypted[folderIdx] = true
+				folderAESParams[folderIdx] = struct {
+					salt       []byte
+					iv         []byte
+					iterations int
+				}{salt, iv, iterations}
+			}
+
+			// Check for compression (non-AES coders)
 			for _, coder := range folder.coder {
 				// Check if this is the copy (no compression) method
 				if len(coder.id) == 1 && coder.id[0] == 0x00 {
@@ -884,16 +966,33 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 					continue
 				}
 
-				// Check for AES encryption
+				// Skip AES coder (already handled above)
 				if len(coder.id) == 4 &&
 					coder.id[0] == 0x06 && coder.id[1] == 0xf1 &&
 					coder.id[2] == 0x07 && coder.id[3] == 0x01 {
-					folderEncrypted[folderIdx] = true
-				} else {
-					// Any other coder means compression
-					folderCompressed[folderIdx] = true
+					continue
 				}
+
+				// Any other coder means compression
+				folderCompressed[folderIdx] = true
 			}
+		}
+	}
+
+	// Get volume path for multi-volume support
+	volumePath := ""
+	if rc, ok := z.r.(*io.SectionReader); ok {
+		// Single file archive - try to get path from ReadCloser
+		_ = rc // Path not directly available from SectionReader
+	}
+	// Try to get from ReadCloser wrapper if available
+	type volumeGetter interface {
+		Volumes() []string
+	}
+	if vg, ok := interface{}(z).(volumeGetter); ok {
+		volumes := vg.Volumes()
+		if len(volumes) > 0 {
+			volumePath = volumes[0]
 		}
 	}
 
@@ -916,9 +1015,25 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 		// This is z.start (where packed data begins in the file) plus the folder's offset
 		// in the packed stream plus the file's offset within the folder
 		var absoluteOffset int64
+		var packedSize uint64
 		if z.si.packInfo != nil {
 			folderOffset := z.si.folderOffset(file.folder)
 			absoluteOffset = z.start + folderOffset + file.offset
+
+			// Calculate packed size for this folder
+			// Sum up all packed stream sizes for this folder
+			if z.si.unpackInfo != nil && file.folder < len(z.si.unpackInfo.folder) {
+				folder := z.si.unpackInfo.folder[file.folder]
+				packedOffset := 0
+				for i := 0; i < file.folder; i++ {
+					packedOffset += len(z.si.unpackInfo.folder[i].packed)
+				}
+				for i := 0; i < len(folder.packed); i++ {
+					if packedOffset+i < len(z.si.packInfo.size) {
+						packedSize += z.si.packInfo.size[packedOffset+i]
+					}
+				}
+			}
 		}
 
 		info := FileInfo{
@@ -928,6 +1043,17 @@ func (z *Reader) ListFilesWithOffsets() ([]FileInfo, error) {
 			Compressed:  isCompressed,
 			Encrypted:   isEncrypted,
 			FolderIndex: file.folder,
+			PackedSize:  packedSize,
+			VolumePath:  volumePath,
+		}
+
+		// Add AES parameters if encrypted
+		if isEncrypted {
+			if params, ok := folderAESParams[file.folder]; ok {
+				info.AESSalt = params.salt
+				info.AESIV = params.iv
+				info.KDFIterations = params.iterations
+			}
 		}
 
 		result = append(result, info)

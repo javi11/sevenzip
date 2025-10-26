@@ -47,6 +47,20 @@ const (
 
 // FileInfo contains information about a file's location and size in the archive.
 // This is useful for direct access to uncompressed, non-encrypted files.
+//
+// For encrypted files, AES parameters are provided to enable streaming decryption:
+//
+// To derive the AES key from a password:
+//  1. Convert password to UTF-16LE encoding
+//  2. Concatenate: salt + password_utf16le
+//  3. Apply SHA-256 hash in rounds: for i = 0 to KDFIterations-1, hash(data + i)
+//  4. Use the resulting 32-byte key with AES-256-CBC and the provided AESIV
+//
+// For streaming/seeking encrypted files:
+//   - Encrypted data is in AES-CBC mode with 16-byte blocks
+//   - Seek to (Offset / 16) * 16 to align to AES block boundary
+//   - Read encrypted blocks and decrypt with AES-256-CBC
+//   - Extract bytes from decrypted stream at file offset within folder
 type FileInfo struct {
 	Name        string // File name
 	Offset      int64  // Absolute offset from the start of the archive file where the file's data begins
@@ -54,6 +68,15 @@ type FileInfo struct {
 	Compressed  bool   // Whether the file uses compression (true means direct extraction not possible)
 	Encrypted   bool   // Whether the file is encrypted (true means direct extraction not possible)
 	FolderIndex int    // Index of the folder/stream containing this file
+
+	// Encryption parameters (populated only if Encrypted == true)
+	AESSalt       []byte // Salt for AES key derivation (typically 0-16 bytes)
+	AESIV         []byte // AES initialization vector (16 bytes for AES-256-CBC)
+	KDFIterations int    // Number of key derivation iterations (2^cycles, e.g., 524288 for cycles=19)
+
+	// Size and volume information
+	PackedSize uint64 // Compressed/packed size in bytes (0 if stored without compression)
+	VolumePath string // Path to primary volume file (useful for multi-volume archives)
 }
 
 var (

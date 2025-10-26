@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/bits"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/javi11/sevenzip"
 )
@@ -14,7 +16,9 @@ import (
 func main() {
 	// Parse command-line arguments
 	var outputDir string
+	var password string
 	flag.StringVar(&outputDir, "o", "./extracted_files", "Output directory for extracted files")
+	flag.StringVar(&password, "p", "", "Password for encrypted archives")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] <archive.7z or archive.7z.001>\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "List and extract files from a 7zip archive with offset information.\n\n")
@@ -23,6 +27,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nExample:\n")
 		fmt.Fprintf(os.Stderr, "  %s archive.7z\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  %s -o ./output multipart.7z.001\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  %s -p mypassword encrypted.7z\n", os.Args[0])
 	}
 	flag.Parse()
 
@@ -34,12 +39,22 @@ func main() {
 
 	archivePath := flag.Arg(0)
 
-	fmt.Printf("Opening multipart archive: %s\n", filepath.Base(archivePath))
-	fmt.Println("=" + string(make([]byte, 80)) + "=")
+	fmt.Printf("Opening archive: %s\n", filepath.Base(archivePath))
+	if password != "" {
+		fmt.Println("Using password for encrypted archive")
+	}
+	fmt.Println("=" + strings.Repeat("=", 80))
 
-	// Open the multipart 7zip archive
-	// Since the file ends with .001, it will automatically open all parts (.001, .002, etc.)
-	reader, err := sevenzip.OpenReader(archivePath)
+	// Open the 7zip archive
+	// If password is provided, use OpenReaderWithPassword
+	// If the file ends with .001, it will automatically open all parts (.001, .002, etc.)
+	var reader *sevenzip.ReadCloser
+	var err error
+	if password != "" {
+		reader, err = sevenzip.OpenReaderWithPassword(archivePath, password)
+	} else {
+		reader, err = sevenzip.OpenReader(archivePath)
+	}
 	if err != nil {
 		log.Fatalf("Failed to open archive: %v", err)
 	}
@@ -79,14 +94,14 @@ func main() {
 	// Display uncompressed, non-encrypted files (these can be accessed directly at their offsets)
 	if len(uncompressedFiles) > 0 {
 		fmt.Println("UNCOMPRESSED FILES (Direct access possible):")
-		fmt.Println("-" + string(make([]byte, 45)) + "-")
+		fmt.Println(strings.Repeat("-", 82))
 		fmt.Printf("%-50s %15s %15s\n", "Filename", "Offset", "Size")
-		fmt.Println("-" + string(make([]byte, 82)) + "-")
+		fmt.Println(strings.Repeat("-", 82))
 
 		var totalSize uint64
 		for _, file := range uncompressedFiles {
 			fmt.Printf("%-50s %15d %15d\n",
-				truncateString(file.Name, 50),
+				file.Name,
 				file.Offset,
 				file.Size)
 			totalSize += file.Size
@@ -98,9 +113,9 @@ func main() {
 	// Display compressed files
 	if len(compressedFiles) > 0 {
 		fmt.Println("COMPRESSED FILES (Decompression required):")
-		fmt.Println("-" + string(make([]byte, 43)) + "-")
+		fmt.Println(strings.Repeat("-", 77))
 		fmt.Printf("%-50s %15s %10s\n", "Filename", "Size", "Folder")
-		fmt.Println("-" + string(make([]byte, 77)) + "-")
+		fmt.Println(strings.Repeat("-", 77))
 
 		for _, file := range compressedFiles {
 			fmt.Printf("%-50s %15d %10d\n",
@@ -111,24 +126,50 @@ func main() {
 		fmt.Printf("\nTotal compressed files: %d\n\n", len(compressedFiles))
 	}
 
-	// Display encrypted files
+	// Display encrypted files with encryption metadata
 	if len(encryptedFiles) > 0 {
 		fmt.Println("ENCRYPTED FILES (Decryption required):")
-		fmt.Println("-" + string(make([]byte, 39)) + "-")
-		fmt.Printf("%-50s %15s %10s\n", "Filename", "Size", "Folder")
-		fmt.Println("-" + string(make([]byte, 77)) + "-")
+		fmt.Println("-" + strings.Repeat("-", 100) + "-")
+		fmt.Printf("%-50s %15s %10s %15s\n", "Filename", "Size", "Folder", "Packed Size")
+		fmt.Println("-" + strings.Repeat("-", 92) + "-")
 
 		for _, file := range encryptedFiles {
-			fmt.Printf("%-50s %15d %10d\n",
+			fmt.Printf("%-50s %15d %10d %15d\n",
 				truncateString(file.Name, 50),
 				file.Size,
-				file.FolderIndex)
+				file.FolderIndex,
+				file.PackedSize)
 		}
-		fmt.Printf("\nTotal encrypted files: %d\n", len(encryptedFiles))
+		fmt.Printf("\nTotal encrypted files: %d\n\n", len(encryptedFiles))
+
+		// Display encryption parameters for the first encrypted file as an example
+		if len(encryptedFiles) > 0 {
+			fmt.Println("ENCRYPTION PARAMETERS (Example - First Encrypted File):")
+			fmt.Println("-" + strings.Repeat("-", 60) + "-")
+			firstEncrypted := encryptedFiles[0]
+			fmt.Printf("File: %s\n", firstEncrypted.Name)
+			if len(firstEncrypted.AESSalt) > 0 {
+				fmt.Printf("  AES Salt: %x\n", firstEncrypted.AESSalt)
+			} else {
+				fmt.Printf("  AES Salt: (none - empty)\n")
+			}
+			fmt.Printf("  AES IV:   %x\n", firstEncrypted.AESIV)
+			fmt.Printf("  KDF Iterations: %d (2^%d rounds)\n",
+				firstEncrypted.KDFIterations,
+				log2(firstEncrypted.KDFIterations))
+			fmt.Printf("  Packed Size: %d bytes\n", firstEncrypted.PackedSize)
+			fmt.Printf("  Uncompressed Size: %d bytes\n\n", firstEncrypted.Size)
+
+			fmt.Println("These parameters can be used for streaming decryption:")
+			fmt.Println("  1. Derive AES-256 key from password using salt and KDF iterations")
+			fmt.Println("  2. Use AES-256-CBC with the provided IV for decryption")
+			fmt.Println("  3. Seek to file offset and decrypt blocks as needed")
+			fmt.Println()
+		}
 	}
 
 	// Summary
-	fmt.Println("\n" + "=" + string(make([]byte, 80)) + "=")
+	fmt.Println("\n" + strings.Repeat("=", 80))
 	fmt.Println("SUMMARY:")
 	fmt.Printf("  Total files:        %d\n", len(files))
 	fmt.Printf("  Uncompressed files: %d (direct access possible)\n", len(uncompressedFiles))
@@ -141,7 +182,7 @@ func main() {
 		fmt.Println("      at their specified offsets without decompression overhead.")
 
 		// Example: Extract the first uncompressed file
-		fmt.Println("\n" + "=" + string(make([]byte, 80)) + "=")
+		fmt.Println("\n" + strings.Repeat("=", 80))
 		fmt.Println("EXTRACTION EXAMPLE:")
 
 		if len(uncompressedFiles) > 0 {
@@ -218,4 +259,12 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// Helper function to calculate log2 of an integer
+func log2(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return bits.Len(uint(n)) - 1
 }

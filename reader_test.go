@@ -747,6 +747,60 @@ func TestListFilesWithOffsets(t *testing.T) {
 		assert.Greater(t, encryptedCount, 0, "Should have encrypted files in aes7z.7z")
 	})
 
+	// Test encryption metadata extraction
+	t.Run("EncryptionMetadata", func(t *testing.T) {
+		r, err := sevenzip.OpenReaderWithPassword(filepath.Join("testdata", "aes7z.7z"), "password")
+		if err != nil {
+			t.Skip("Test file not found, skipping test")
+		}
+		defer r.Close()
+
+		files, err := r.ListFilesWithOffsets()
+		assert.NoError(t, err)
+		assert.NotNil(t, files)
+
+		// Verify encryption parameters are present for encrypted files
+		foundEncryptedWithMetadata := false
+		for _, file := range files {
+			if file.Encrypted {
+				foundEncryptedWithMetadata = true
+
+				// AES parameters should be populated
+				// Note: Salt can be nil or empty (zero-length) - 7-zip allows optional salt
+				assert.NotNil(t, file.AESIV, "Encrypted file should have AES IV: %s", file.Name)
+				assert.Greater(t, file.KDFIterations, 0, "Encrypted file should have KDF iterations: %s", file.Name)
+
+				// IV should be exactly 16 bytes (AES block size)
+				assert.Equal(t, 16, len(file.AESIV), "AES IV should be 16 bytes: %s", file.Name)
+
+				// Salt should be reasonable size (typically 0-16 bytes, can be empty)
+				if file.AESSalt != nil {
+					assert.LessOrEqual(t, len(file.AESSalt), 16, "AES salt should be <= 16 bytes: %s", file.Name)
+				}
+
+				// KDF iterations should be a power of 2 (2^cycles)
+				assert.Greater(t, file.KDFIterations, 0, "KDF iterations should be positive: %s", file.Name)
+
+				// Log the parameters for debugging
+				t.Logf("Encrypted file: %s", file.Name)
+				t.Logf("  Salt: %x (len=%d)", file.AESSalt, len(file.AESSalt))
+				t.Logf("  IV: %x (len=%d)", file.AESIV, len(file.AESIV))
+				t.Logf("  KDF Iterations: %d", file.KDFIterations)
+				t.Logf("  Packed Size: %d", file.PackedSize)
+			} else {
+				// Non-encrypted files should not have AES parameters
+				// Salt can be nil or empty, both are acceptable for non-encrypted files
+				if file.AESSalt != nil {
+					assert.Equal(t, 0, len(file.AESSalt), "Non-encrypted file should have empty AES salt: %s", file.Name)
+				}
+				assert.Nil(t, file.AESIV, "Non-encrypted file should not have AES IV: %s", file.Name)
+				assert.Equal(t, 0, file.KDFIterations, "Non-encrypted file should have zero KDF iterations: %s", file.Name)
+			}
+		}
+
+		assert.True(t, foundEncryptedWithMetadata, "Should have found at least one encrypted file with metadata")
+	})
+
 	// Test direct offset extraction validation
 	t.Run("DirectOffsetExtraction", func(t *testing.T) {
 		archivePath := filepath.Join("testdata", "copy.7z")
